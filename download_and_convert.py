@@ -23,6 +23,7 @@ import html
 from typing import Dict, List, Any
 import os
 import argparse
+import time
 from config import API_BASE_URL, API_KEY, DEFAULT_BATCH_SIZE, DEFAULT_NUM_BATCHES, DEFAULT_OUTPUT_DIR, DEFAULT_INPUT_FILE
 
 def download_raw_data(output_file="raw.json", limit=5, offset=0):
@@ -115,7 +116,20 @@ def download_multiple_batches(output_file="raw.json", batch_size=5, num_batches=
             if len(articles) < batch_size:
                 print(f"⚠️  Batch {batch + 1} returned fewer articles than requested. This might be the last batch.")
                 break
+            
+            # Add delay to avoid rate limiting (except for the last batch)
+            if batch < num_batches - 1:
+                time.sleep(1.2)  # Wait 1.2 seconds to ensure we don't exceed 1 req/sec limit
                 
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 429:
+                print(f"⚠️  Rate limit hit (429). Waiting 2 seconds before continuing...")
+                time.sleep(2)
+                # Skip this batch and continue with next one
+                continue
+            else:
+                print(f"❌ Error downloading batch {batch + 1}: {e}")
+                continue
         except requests.exceptions.RequestException as e:
             print(f"❌ Error downloading batch {batch + 1}: {e}")
             continue
