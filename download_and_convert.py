@@ -216,8 +216,10 @@ def _parse_html_attributes(attrs_str: str) -> Dict[str, str]:
     Handles double-quoted, single-quoted, and unquoted values.
     """
     attrs = {}
+    # Some sources store escaped quotes (e.g., \" or \'), normalize first
+    attrs_str = (attrs_str or "").replace('\\"', '"').replace("\\'", "'")
     attr_re = re.compile(r'(\w[\w:-]*)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))')
-    for match in attr_re.finditer(attrs_str or ""):
+    for match in attr_re.finditer(attrs_str):
         key = (match.group(1) or "").lower()
         val = match.group(2) or match.group(3) or match.group(4) or ""
         if key:
@@ -258,6 +260,44 @@ def convert_html_string_to_markdown(html_str: str) -> str:
     """
     replaced = replace_datawrapper_embeds(html_str)
     return clean_text(replaced)
+
+def _extract_datawrapper_html_from_node(node: dict) -> str:
+    """
+    Extract Datawrapper iframe HTML from irregular node shapes.
+    Returns empty string if not found.
+    """
+    if not isinstance(node, dict) or not node:
+        return ""
+
+    # Common fields that might contain raw HTML
+    for key in ("html", "text", "value", "raw", "embed", "iframe"):
+        val = node.get(key)
+        if isinstance(val, str) and "<iframe" in val and "datawrapper" in val:
+            return val
+
+    # htmlEmbed nodes often store HTML in attrs.html
+    attrs = node.get("attrs")
+    if isinstance(attrs, dict):
+        for key in ("html", "text", "value", "raw", "embed", "iframe"):
+            val = attrs.get(key)
+            if isinstance(val, str) and "<iframe" in val and "datawrapper" in val:
+                return val
+
+    # Single-key dict with the iframe HTML as the key
+    if len(node) == 1:
+        only_key = next(iter(node.keys()))
+        if isinstance(only_key, str) and "<iframe" in only_key and "datawrapper" in only_key:
+            return only_key
+        only_val = node.get(only_key)
+        if isinstance(only_val, str) and "<iframe" in only_val and "datawrapper" in only_val:
+            return only_val
+
+    # Fallback: scan all string values
+    for val in node.values():
+        if isinstance(val, str) and "<iframe" in val and "datawrapper" in val:
+            return val
+
+    return ""
 
 def parse_content(content_data: Any) -> str:
     """
@@ -316,6 +356,10 @@ def convert_node_to_markdown(node: dict) -> str:
     """
     Convert a single node to Markdown format
     """
+    html_str = _extract_datawrapper_html_from_node(node)
+    if html_str:
+        return convert_html_string_to_markdown(html_str)
+
     node_type = node.get('type', '')
     
     if node_type == 'paragraph':
@@ -357,7 +401,11 @@ def convert_paragraph_to_markdown(node: dict) -> str:
     text_parts = []
     for item in node['content']:
         if isinstance(item, dict):
-            text_parts.append(convert_text_node_to_markdown(item))
+            html_str = _extract_datawrapper_html_from_node(item)
+            if html_str:
+                text_parts.append(convert_html_string_to_markdown(html_str))
+            else:
+                text_parts.append(convert_text_node_to_markdown(item))
         elif isinstance(item, str):
             text_parts.append(convert_html_string_to_markdown(item))
 
