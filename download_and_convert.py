@@ -210,6 +210,55 @@ def clean_text(text: str) -> str:
     
     return text
 
+def _parse_html_attributes(attrs_str: str) -> Dict[str, str]:
+    """
+    Parse HTML tag attributes into a lowercase-key dict.
+    Handles double-quoted, single-quoted, and unquoted values.
+    """
+    attrs = {}
+    attr_re = re.compile(r'(\w[\w:-]*)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))')
+    for match in attr_re.finditer(attrs_str or ""):
+        key = (match.group(1) or "").lower()
+        val = match.group(2) or match.group(3) or match.group(4) or ""
+        if key:
+            attrs[key] = html.unescape(val)
+    return attrs
+
+def replace_datawrapper_embeds(text: str) -> str:
+    """
+    Replace Datawrapper iframe embeds with a Markdown-friendly line
+    that preserves title and link.
+    """
+    if not text or "datawrapper" not in text or "<iframe" not in text:
+        return text
+
+    iframe_re = re.compile(r'<iframe\b([^>]*)>.*?</iframe>', re.IGNORECASE | re.DOTALL)
+
+    def _repl(match: re.Match) -> str:
+        attrs_str = match.group(1)
+        attrs = _parse_html_attributes(attrs_str)
+        src = attrs.get("src", "")
+        if "datawrapper.dwcdn.net" not in src:
+            return match.group(0)
+        title = attrs.get("title") or attrs.get("aria-label") or attrs.get("id") or "Datawrapper chart"
+        title = clean_text(title)
+        return f"This is a chart from Datawrapper about {title} from {src}."
+
+    text = iframe_re.sub(_repl, text)
+
+    # Remove Datawrapper resize scripts (keep body clean)
+    script_re = re.compile(r'<script[^>]*>.*?datawrapper.*?</script>', re.IGNORECASE | re.DOTALL)
+    text = script_re.sub("", text)
+    return text
+
+def convert_html_string_to_markdown(html_str: str) -> str:
+    """
+    Convert raw HTML string to Markdown-friendly text.
+    Currently specializes in Datawrapper embeds.
+    """
+    replaced = replace_datawrapper_embeds(html_str)
+    return clean_text(replaced)
+
 def parse_content(content_data: Any) -> str:
     """
     Parse rich text content from content field and convert to Markdown format
@@ -222,12 +271,24 @@ def parse_content(content_data: Any) -> str:
         try:
             content_data = json.loads(content_data)
         except:
-            return clean_text(content_data)
-    
+            return convert_html_string_to_markdown(content_data)
+
     # If content is a dict, extract and convert to Markdown
     if isinstance(content_data, dict):
         return convert_to_markdown(content_data)
-    
+    if isinstance(content_data, list):
+        parts = []
+        for item in content_data:
+            if isinstance(item, dict):
+                md = convert_node_to_markdown(item)
+            elif isinstance(item, str):
+                md = convert_html_string_to_markdown(item)
+            else:
+                md = str(item)
+            if md.strip():
+                parts.append(md)
+        return '\n\n'.join(parts)
+
     return str(content_data)
 
 def convert_to_markdown(content_obj: dict) -> str:
@@ -242,8 +303,12 @@ def convert_to_markdown(content_obj: dict) -> str:
     for item in content_obj['content']:
         if isinstance(item, dict):
             markdown_item = convert_node_to_markdown(item)
-            if markdown_item.strip():
-                markdown_parts.append(markdown_item)
+        elif isinstance(item, str):
+            markdown_item = convert_html_string_to_markdown(item)
+        else:
+            markdown_item = str(item)
+        if markdown_item.strip():
+            markdown_parts.append(markdown_item)
     
     return '\n\n'.join(markdown_parts)
 
@@ -293,7 +358,9 @@ def convert_paragraph_to_markdown(node: dict) -> str:
     for item in node['content']:
         if isinstance(item, dict):
             text_parts.append(convert_text_node_to_markdown(item))
-    
+        elif isinstance(item, str):
+            text_parts.append(convert_html_string_to_markdown(item))
+
     return ''.join(text_parts)
 
 def convert_text_node_to_markdown(node: dict) -> str:
@@ -695,6 +762,7 @@ def generate_article_markdown(article: Dict[str, Any], out_dir: str = "md_export
     authors = article.get('authors', [])
     publisher = article.get('publisher', '')
     last_edited = article.get('last_edited_date', '')
+    publication_time = article.get('publication_time', '')
     tags = article.get('tags', [])
     countries = article.get('countries', [])
     channels = article.get('channels', [])
@@ -783,7 +851,10 @@ def generate_article_markdown(article: Dict[str, Any], out_dir: str = "md_export
     if article_id:
         md_content.append(f"- **ID**: {article_id}")
     md_content.append(f"- **Author**: {format_authors(authors)}")
+    publisher_display = publisher if publisher else "Unknown publisher"
+    md_content.append(f"- **Publisher**: {publisher_display}")
     md_content.append(f"- **Last Edited**: {format_date(last_edited)}")
+    md_content.append(f"- **Publication Time**: {format_date(publication_time)}")
     md_content.append("")
     
     # Categories and tags
