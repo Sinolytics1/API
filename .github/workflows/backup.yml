@@ -23,7 +23,7 @@ jobs:
       - name: Add GitLab remote
         run: |
           git remote remove gitlab 2>/dev/null || true
-          git remote add gitlab https://oauth2:${{ secrets.GITLAB_TOKEN }}@gitlab.com/backup7055008/backup/SiemensAPI_backup.git
+          git remote add gitlab https://oauth2:${{ secrets.GITLAB_TOKEN }}@gitlab.com/backup7055008/backup/siemensapi_backup.git
 
       - name: Push branches and tags
         run: |
