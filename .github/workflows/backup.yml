@@ -1,0 +1,35 @@
+name: Mirror to GitLab
+
+on:
+  schedule:
+    - cron: '0 2 * * *'   # 每天 02:00 UTC
+  workflow_dispatch:
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout full repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Git
+        run: |
+          git config --global user.name "backup-bot"
+          git config --global user.email "backup@company.com"
+
+      - name: Add GitLab remote
+        run: |
+          git remote remove gitlab 2>/dev/null || true
+          git remote add gitlab https://oauth2:${{ secrets.GITLAB_TOKEN }}@gitlab.com/backup7055008/backup/SiemensAPI_backup.git
+
+      - name: Push branches and tags
+        run: |
+          git push --force --prune gitlab "refs/heads/*:refs/heads/*"
+          git push --force --prune gitlab "refs/tags/*:refs/tags/*"
+
+      - name: Show remote
+        run: |
+          git remote -v | sed 's/oauth2:[^@]*/oauth2:*** /g'
